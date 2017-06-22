@@ -27,6 +27,7 @@ var (
 	flagChangeCallbacks = make(map[string][]FlagChangeCallback)
 	importStack         []string
 	parsed              bool
+	subcommands         map[string]*Subcommand = make(map[string]*Subcommand)
 )
 
 // Generation is flags' generation number.
@@ -41,13 +42,33 @@ var Generation int
 // them by values parsed from config file set via -config.
 //
 // Path to config file can also be set via SetConfigFile() before Parse() call.
-func Parse() {
+func Parse() string {
 	if parsed {
 		logger.Panicf("iniflags: duplicate call to iniflags.Parse() detected")
 	}
 
 	parsed = true
-	flag.Parse()
+
+	osArgs := os.Args[1:]
+	var subcommand *Subcommand = nil
+
+	if len(subcommands) > 0 {
+		for i, arg := range osArgs {
+			if _, ok := subcommands[arg]; ok {
+				// if a subcommand is found, slice out the command (because golang.flag chokes on this)
+				osArgs = append(osArgs[0:i], osArgs[i+1:]...)
+				subcommand = subcommands[arg]
+				break
+			}
+		}
+	}
+
+	if subcommand != nil {
+		subcommand.flagSet.Parse(osArgs)
+	} else {
+		flag.Parse()
+	}
+
 	_, ok := parseConfigFlags()
 	if !ok {
 		os.Exit(1)
@@ -69,6 +90,12 @@ func Parse() {
 	go sighupHandler(ch)
 
 	go configUpdater()
+
+	if subcommand != nil {
+		return subcommand.Name
+	} else {
+		return ""
+	}
 }
 
 func configUpdater() {
